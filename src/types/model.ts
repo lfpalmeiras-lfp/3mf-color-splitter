@@ -12,6 +12,8 @@ export interface ModelPart {
   /** Cor em hexadecimal, formato #rrggbb. */
   color: string;
   geometry: THREE.BufferGeometry;
+  /** De onde veio a cor (preenchido na importação de 3MF). */
+  source?: string;
 }
 
 /** Dimensões do modelo em milímetros. */

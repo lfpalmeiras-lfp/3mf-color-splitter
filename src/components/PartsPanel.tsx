@@ -25,6 +25,7 @@ export default function PartsPanel({ parts, hiddenIds, onToggle }: Props) {
                   <span>
                     {p.color} · {formatNumber(triangleCount(p.geometry))} triângulos
                   </span>
+                  {p.source && <span className="part-source">{p.source}</span>}
                 </div>
                 <button
                   className="icon-btn"
@@ -40,8 +41,7 @@ export default function PartsPanel({ parts, hiddenIds, onToggle }: Props) {
         </ul>
       )}
       <p className="soon">
-        Detecção automática de cores, volume, componentes e agrupamento: em desenvolvimento
-        (Etapas 2 e 3).
+        Volume, componentes conectados e agrupamento de cores: em desenvolvimento (Etapa 3).
       </p>
     </aside>
   );

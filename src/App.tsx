@@ -4,10 +4,13 @@ import DropZone from './components/DropZone';
 import PartsPanel from './components/PartsPanel';
 import BottomPanel from './components/BottomPanel';
 import ViewerToolbar from './components/ViewerToolbar';
+import ImportProgress from './components/ImportProgress';
 import Viewer from './viewer/Viewer';
 import { validate3mfFile } from './utils/fileValidation';
 import { createTestModel } from './utils/testModel';
-import { formatBytes, formatMm } from './utils/format';
+import { formatBytes, formatMm, formatNumber } from './utils/format';
+import { startImport, type ImportHandle, type ImportProgress as Progress } from './utils/importClient';
+import type { ImportInfo } from './threemf/types';
 import type {
   Dimensions,
   LoadedFileInfo,
@@ -28,26 +31,53 @@ export default function App() {
   const [frameNonce, setFrameNonce] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
   const [fileInfo, setFileInfo] = useState<LoadedFileInfo | null>(null);
+  const [importInfo, setImportInfo] = useState<ImportInfo | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
   const [isTestModel, setIsTestModel] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<ImportHandle | null>(null);
 
   const handleFile = useCallback(async (file: File) => {
+    if (importRef.current) return; // já existe uma importação em andamento
     const result = await validate3mfFile(file);
     if (!result.ok) {
-      setNotice({ kind: 'error', text: result.message });
+      setNotice({ kind: 'error', text: `${file.name}: ${result.message}` });
       return;
     }
-    setFileInfo({ name: file.name, sizeBytes: file.size });
-    setNotice({
-      kind: 'ok',
-      text: `${result.message} A leitura da geometria e das cores ainda está em desenvolvimento (Etapa 2).`,
-    });
+    setNotice(null);
+    setProgress({ stage: 'Lendo 3MF...', percent: 0 });
+    const handle = startImport(file, setProgress);
+    importRef.current = handle;
+    try {
+      const imported = await handle.promise;
+      setParts(imported.parts);
+      setHiddenIds(new Set());
+      setImportInfo(imported.info);
+      setFileInfo({ name: file.name, sizeBytes: file.size });
+      setIsTestModel(false);
+      const n = imported.info.warnings.length;
+      setNotice({
+        kind: 'ok',
+        text: `${file.name} (${formatBytes(file.size)}): ${formatNumber(imported.parts.length)} cor(es), ${formatNumber(
+          imported.info.triangleCount,
+        )} triângulos${n > 0 ? `. ${n} aviso(s) no painel inferior.` : '.'}`,
+      });
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      if (err.code !== 'cancelled')
+        setNotice({ kind: 'error', text: `${file.name}: ${err.message ?? 'Falha ao importar o arquivo.'}` });
+      else setNotice({ kind: 'error', text: 'Importação cancelada.' });
+    } finally {
+      importRef.current = null;
+      setProgress(null);
+    }
   }, []);
 
   const loadTest = useCallback(() => {
     setParts(createTestModel());
     setHiddenIds(new Set());
     setFileInfo(null);
+    setImportInfo(null);
     setNotice(null);
     setIsTestModel(true);
   }, []);
@@ -56,6 +86,8 @@ export default function App() {
     setParts([]);
     setHiddenIds(new Set());
     setDims(null);
+    setImportInfo(null);
+    setFileInfo(null);
     setIsTestModel(false);
   }, []);
 
@@ -107,34 +139,41 @@ export default function App() {
         />
         {hasModel && dims && (
           <div className="dims">
-            <div className="dims-title">
-              {isTestModel ? 'Modelo de teste' : fileInfo?.name}
-            </div>
+            <div className="dims-title">{isTestModel ? 'Modelo de teste' : fileInfo?.name}</div>
             <div>X {formatMm(dims.x)}</div>
             <div>Y {formatMm(dims.y)}</div>
             <div>Z {formatMm(dims.z)}</div>
-            {hasModel && (
-              <button className="link" onClick={closeModel}>
-                Fechar modelo
-              </button>
-            )}
+            <button className="link" onClick={closeModel}>
+              Fechar modelo
+            </button>
           </div>
         )}
         {!hasModel && (
           <DropZone
             onFile={(f) => void handleFile(f)}
             onLoadTestModel={loadTest}
-            notice={
-              notice && fileInfo
-                ? { ...notice, text: `${fileInfo.name} (${formatBytes(fileInfo.sizeBytes)}): ${notice.text}` }
-                : notice
-            }
+            notice={notice}
             inputRef={inputRef}
+          />
+        )}
+        {hasModel && notice && (
+          <div className={`toast ${notice.kind}`} role="status">
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} aria-label="Fechar aviso">
+              ×
+            </button>
+          </div>
+        )}
+        {progress && (
+          <ImportProgress
+            stage={progress.stage}
+            percent={progress.percent}
+            onCancel={() => importRef.current?.cancel()}
           />
         )}
       </main>
 
-      <BottomPanel />
+      <BottomPanel info={importInfo} fileName={isTestModel ? 'Modelo de teste' : (fileInfo?.name ?? null)} />
     </div>
   );
 }
